@@ -4,23 +4,19 @@ import { getAdminFirestore } from "@/lib/firebase/admin";
 import type { KiwifyWebhookPayload, PurchaseStatus } from "@/types/domain";
 
 const SUPPORTED_EVENTS = new Set(["compra_aprovada", "compra_reembolsada", "chargeback"]);
-
 function safeEqual(a: string, b: string) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export function verifyWebhookToken(request: Request, payload: KiwifyWebhookPayload) {
+export function verifyWebhookToken(payload: KiwifyWebhookPayload) {
   const expected = process.env.KIWIFY_WEBHOOK_TOKEN;
-  if (!expected) return { ok: false as const, reason: "KIWIFY_WEBHOOK_TOKEN não configurado" };
-  const supplied = request.headers.get("x-kiwify-webhook-token")
-    || request.headers.get("x-webhook-token")
-    || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
-    || (typeof payload.token === "string" ? payload.token : "");
+  if (!expected) return { ok: false as const, reason: "token_not_configured" };
+  const supplied = typeof payload.token === "string" ? payload.token : "";
   return safeEqual(supplied, expected)
     ? { ok: true as const }
-    : { ok: false as const, reason: "token inválido" };
+    : { ok: false as const, reason: "token_invalid" };
 }
 
 function stringValue(value: unknown) {

@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 // Testes puros da política de entrada; integração Firestore é executada após configurar o Admin SDK.
-test('endpoint exige token configurado', () => {
-  assert.equal(typeof process.env.KIWIFY_WEBHOOK_TOKEN, 'undefined');
+test('endpoint exige token configurado no payload do webhook clássico', async () => {
+  const text = await (await import('node:fs/promises')).readFile('services/kiwify-webhook.ts', 'utf8');
+  assert.match(text, /KIWIFY_WEBHOOK_TOKEN/);
+  assert.match(text, /payload\.token/);
+  assert.match(text, /timingSafeEqual/);
 });
 
 test('o projeto não deve conter credenciais de servidor no exemplo', async () => {

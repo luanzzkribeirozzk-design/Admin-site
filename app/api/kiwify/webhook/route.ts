@@ -70,17 +70,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "payload inválido" }, { status: 400 });
   }
 
-  const token = verifyWebhookToken(request, validation.data);
+  const token = verifyWebhookToken(validation.data);
   if (!token.ok) {
-    const status = token.reason.includes("não configurado") ? 503 : 401;
-    logWebhookDiagnostic({
-      validation: status === 503 ? "token_not_configured" : "token_invalid",
-      responseStatus: status,
-    });
+    const status = token.reason === "token_not_configured" ? 503 : 401;
+    logWebhookDiagnostic({ validation: "token_rejected", responseStatus: status });
     await saveWebhookDiagnostic({ ...metadata, validation: "rejected", statusHttp: status, processing: "not_run" });
     return NextResponse.json({ ok: false, error: "webhook não autorizado" }, { status });
   }
-  logWebhookDiagnostic({ validation: "token_valid" });
+  logWebhookDiagnostic({ validation: "token_approved" });
 
   try {
     const result = await processKiwifyWebhook(validation.data, rawBody);
