@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.*.local
+!.env.example
+*.log
+.DS_Store
+coverage/
+*.tsbuildinfo
+.firebase/
+service-account*.json
+*-firebase-adminsdk-*.json
