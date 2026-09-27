@@ -34,6 +34,10 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /webhook_diagnostics/{diagnosticId} {
+      allow read, write: if false;
+    }
+
     match /settings/{settingId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
