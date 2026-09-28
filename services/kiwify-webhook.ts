@@ -1,13 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { getAuth, type UserRecord } from "firebase-admin/auth";
 import { FieldValue } from "firebase-admin/firestore";
-import { getAdminFirestore } from "@/lib/firebase/admin";
+import { getFirebaseAdminApp, getAdminFirestore } from "@/lib/firebase/admin";
 import type { KiwifyWebhookPayload, PurchaseStatus } from "@/types/domain";
 
-const SUPPORTED_EVENTS = new Set([
-  "order_approved",
-  "order_refunded",
-  "chargeback",
-]);
+const SUPPORTED_EVENTS = new Set(["order_approved", "order_refunded", "chargeback"]);
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -35,8 +32,6 @@ export function verifyWebhookPathSecret(secret: string) {
     : { ok: false as const, reason: "path_secret_invalid" };
 }
 
-export type ClassicPayloadStage = "passed" | "failed";
-
 export function inspectClassicPayload(payload: KiwifyWebhookPayload) {
   const expectedStoreId = process.env.KIWIFY_STORE_ID || process.env.KIWIFY_ACCOUNT_ID;
   const expectedProductId = process.env.KIWIFY_PRODUCT_ID;
@@ -56,7 +51,6 @@ export function validateClassicPayload(payload: KiwifyWebhookPayload) {
   if (!process.env.KIWIFY_STORE_ID && !process.env.KIWIFY_ACCOUNT_ID) return { ok: false as const, reason: "store_not_configured" };
   if (!process.env.KIWIFY_PRODUCT_ID) return { ok: false as const, reason: "product_not_configured" };
   const stages = inspectClassicPayload(payload);
-
   if (stages.store_id === "failed") return { ok: false as const, reason: "store_invalid" };
   if (stages.product_id === "failed") return { ok: false as const, reason: "product_invalid" };
   if (stages.webhook_event_type === "failed" || stages.event_supported === "failed") return { ok: false as const, reason: "event_unsupported" };
@@ -84,7 +78,47 @@ export function normalizeEvent(payload: KiwifyWebhookPayload, rawBody: string) {
   const rawAmount = payload.amount ?? commissions.charge_amount ?? commissions.my_commission ?? data.amount;
   const amount = typeof rawAmount === "number" ? rawAmount : typeof rawAmount === "string" && /^\d+(\.\d+)?$/.test(rawAmount) ? Number(rawAmount) : undefined;
   const payloadHash = createHash("sha256").update(rawBody).digest("hex");
-  return { eventType, eventId: eventId || `payload:${payloadHash}`, transactionId, email, name, productId, amount, payloadHash };
+  return { eventType, eventId: eventId || `payload:${payloadHash}`, transactionId, email: email?.toLowerCase(), name, productId, amount, payloadHash };
+}
+
+async function findOrCreateAuthUser(email: string): Promise<UserRecord> {
+  const auth = getAuth(getFirebaseAdminApp());
+  try {
+    return await auth.getUserByEmail(email);
+  } catch (error) {
+    if ((error as { code?: string }).code !== "auth/user-not-found") throw error;
+    try {
+      return await auth.createUser({ email, disabled: false });
+    } catch (createError) {
+      if ((createError as { code?: string }).code === "auth/email-already-exists") return auth.getUserByEmail(email);
+      throw createError;
+    }
+  }
+}
+
+async function findAuthUserForRevocation(email: string | undefined, userId: unknown) {
+  const auth = getAuth(getFirebaseAdminApp());
+  if (typeof userId === "string" && userId) {
+    try { return await auth.getUser(userId); } catch (error) {
+      if ((error as { code?: string }).code !== "auth/user-not-found") throw error;
+    }
+  }
+  if (!email) return undefined;
+  try { return await auth.getUserByEmail(email); } catch (error) {
+    if ((error as { code?: string }).code === "auth/user-not-found") return undefined;
+    throw error;
+  }
+}
+
+export function shouldBlockAfterRevocation(
+  purchases: Array<{ transactionId?: unknown; productId?: unknown; status?: unknown }>,
+  currentTransactionId: string,
+  productId: string | undefined,
+) {
+  return !purchases.some((purchase) =>
+    purchase.transactionId !== currentTransactionId
+      && purchase.status === "approved"
+      && (!productId || purchase.productId === productId));
 }
 
 export async function processKiwifyWebhook(payload: KiwifyWebhookPayload, rawBody: string) {
@@ -92,38 +126,83 @@ export async function processKiwifyWebhook(payload: KiwifyWebhookPayload, rawBod
   if (!normalized.eventType || !SUPPORTED_EVENTS.has(normalized.eventType)) {
     return { kind: "ignored" as const, eventId: normalized.eventId, reason: "evento não suportado" };
   }
+  const eventType = normalized.eventType;
+  if (!normalized.transactionId) return { kind: "ignored" as const, eventId: normalized.eventId, reason: "order_id ausente" };
+
   const firestore = getAdminFirestore();
+  const auth = getAuth(getFirebaseAdminApp());
   const eventRef = firestore.collection("webhook_events").doc(normalized.eventId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 150));
-  const purchase = purchaseStatus(normalized.eventType);
+  const purchaseRef = firestore.collection("purchases").doc(normalized.transactionId);
+  const existingEvent = await eventRef.get();
+  if (existingEvent.exists && existingEvent.data()?.processed === true) return { kind: "duplicate" as const, eventId: normalized.eventId };
+
+  const isApproval = eventType === "order_approved";
+  const existingPurchase = await purchaseRef.get();
+  const existingUserId = existingPurchase.data()?.userId;
+  const authUser = isApproval
+    ? normalized.email ? await findOrCreateAuthUser(normalized.email) : undefined
+    : await findAuthUserForRevocation(normalized.email, existingUserId);
+  if (isApproval && !authUser) return { kind: "ignored" as const, eventId: normalized.eventId, reason: "email do comprador ausente" };
 
   const result = await firestore.runTransaction(async (transaction) => {
-    const existing = await transaction.get(eventRef);
-    if (existing.exists && existing.data()?.processed === true) return "duplicate" as const;
+    const currentEvent = await transaction.get(eventRef);
+    if (currentEvent.exists && currentEvent.data()?.processed === true) return { kind: "duplicate" as const, shouldDisableAuth: undefined };
+    const currentPurchase = await transaction.get(purchaseRef);
+    const userId = authUser?.uid;
+    const userRef = userId ? firestore.collection("users").doc(userId) : undefined;
+    const userSnapshot = userRef ? await transaction.get(userRef) : undefined;
+    let shouldDisableAuth: boolean | undefined;
+
+    if (!isApproval && userId) {
+      const userPurchases = await transaction.get(firestore.collection("purchases").where("userId", "==", userId));
+      const rows = userPurchases.docs.map((doc) => doc.data());
+      shouldDisableAuth = shouldBlockAfterRevocation(rows, normalized.transactionId as string, normalized.productId);
+    }
+
     transaction.set(eventRef, {
       eventId: normalized.eventId,
-      eventType: normalized.eventType,
+      eventType,
       processed: false,
       receivedAt: FieldValue.serverTimestamp(),
       payloadHash: normalized.payloadHash,
     }, { merge: true });
 
-    if (normalized.transactionId && purchase) {
-      const purchaseRef = firestore.collection("purchases").doc(normalized.transactionId);
-      transaction.set(purchaseRef, {
-        transactionId: normalized.transactionId,
-        productId: normalized.productId || process.env.KIWIFY_PRODUCT_ID || null,
-        status: purchase,
-        amount: normalized.amount ?? null,
+    if (userRef && userId) {
+      const previousUser = userSnapshot?.data();
+      transaction.set(userRef, {
+        uid: userId,
+        email: authUser?.email || normalized.email || previousUser?.email || null,
+        role: previousUser?.role === "admin" ? "admin" : "user",
+        status: shouldDisableAuth ? "blocked" : "active",
+        ...(userSnapshot?.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
         updatedAt: FieldValue.serverTimestamp(),
-        createdAt: FieldValue.serverTimestamp(),
-        ...(normalized.email ? { customerEmail: normalized.email } : {}),
-        ...(normalized.name ? { customerName: normalized.name } : {}),
       }, { merge: true });
     }
 
-    transaction.update(eventRef, { processed: true, processedAt: FieldValue.serverTimestamp() });
-    return "processed" as const;
+    const purchaseData: Record<string, unknown> = {
+      transactionId: normalized.transactionId,
+      productId: normalized.productId || process.env.KIWIFY_PRODUCT_ID || null,
+      status: purchaseStatus(eventType),
+      eventType,
+      amount: normalized.amount ?? null,
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(currentPurchase.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      ...(normalized.email ? { customerEmail: normalized.email } : {}),
+      ...(normalized.name ? { customerName: normalized.name } : {}),
+      ...(userId ? { userId } : {}),
+    };
+    transaction.set(purchaseRef, purchaseData, { merge: true });
+    return { kind: "pending_auth_sync" as const, shouldDisableAuth, userId };
   });
 
-  return { kind: result, eventId: normalized.eventId };
+  if (result.kind === "duplicate") return { kind: "duplicate" as const, eventId: normalized.eventId };
+  if (result.userId) await auth.updateUser(result.userId, { disabled: result.shouldDisableAuth === true });
+
+  await firestore.runTransaction(async (transaction) => {
+    const currentEvent = await transaction.get(eventRef);
+    if (currentEvent.exists && currentEvent.data()?.processed !== true) {
+      transaction.update(eventRef, { processed: true, processedAt: FieldValue.serverTimestamp() });
+    }
+  });
+  return { kind: "processed" as const, eventId: normalized.eventId };
 }

@@ -8,7 +8,7 @@ Fundação técnica do repositório **Admin-site**. O `Cliente-site` não faz pa
 - Firebase Web SDK para autenticação/Firestore no cliente.
 - Firebase Admin SDK somente no servidor, com credenciais por variáveis de ambiente.
 - Cloud Firestore como banco exclusivo.
-- Endpoint `POST /api/kiwify/webhook` dentro do próprio projeto.
+- Endpoint `POST /api/kiwify/webhook/<segredo>` dentro do próprio projeto.
 - Coleções previstas: `users`, `purchases`, `webhook_events`, `settings`.
 
 ## Configuração local
@@ -62,26 +62,25 @@ As regras não utilizam `allow read, write: if true`. O Admin SDK ignora regras 
 
 ## Webhook Kiwify
 
-A URL esperada após o deploy é:
+A URL esperada após o deploy é a URL secreta configurada na Kiwify:
 
 ```text
-https://SEU-DOMINIO-VERCEL.vercel.app/api/kiwify/webhook
+https://SEU-DOMINIO-VERCEL.vercel.app/api/kiwify/webhook/SEU_SEGREDO
 ```
 
-A rota aceita `POST` JSON, exige `KIWIFY_WEBHOOK_TOKEN`, faz validação básica, calcula hash do payload, registra `webhook_events` e processa apenas uma vez cada `eventId` (ou hash determinístico quando o evento não o fornece). Os eventos inicialmente reconhecidos são `compra_aprovada`, `compra_reembolsada` e `chargeback`.
+A rota aceita `POST` JSON somente no caminho secreto, valida `store_id`, `Product.product_id` e `webhook_event_type`, calcula hash do payload, registra `webhook_events` e processa apenas uma vez cada `order_id:event_type`. Os eventos de entrega reconhecidos são `order_approved`, `order_refunded` e `chargeback`; `billet_created` não libera acesso.
 
-A documentação oficial consultada da Kiwify descreve webhooks JSON, configuração por produto/evento, reenvio/logs e os gatilhos `compra_aprovada`, `compra_reembolsada` e `chargeback`. A API também documenta um token por webhook. Como o formato exato de payload pode variar conforme o produto/configuração, o mapeamento está isolado em `services/kiwify-webhook.ts` e não inventa credenciais.
+A documentação oficial consultada da Kiwify descreve webhooks JSON, configuração por produto/evento e os gatilhos `compra_aprovada`, `compra_reembolsada` e `chargeback`; o payload clássico observado usa `order_approved`, `order_refunded` e `chargeback` em `webhook_event_type`. O backend usa uma URL secreta como proteção adicional, sem registrar o segredo.
+
+### Acesso do cliente
+
+Em `order_approved`, o backend localiza ou cria o usuário no Firebase Authentication pelo e-mail, cria/ativa `users/{uid}` com `role: "user"` e `status: "active"`, e grava `purchases/{order_id}` com `userId` e status `approved`. Em `order_refunded` ou `chargeback`, atualiza a compra e só bloqueia o usuário quando não há outra compra aprovada do mesmo produto; nesse caso também define `disabled: true` no Firebase Authentication. O processamento é idempotente e mantém eventos pendentes se a sincronização do Authentication falhar, permitindo reprocessamento seguro.
 
 **Não cadastrar o webhook na Kiwify ainda.** Primeiro faça deploy, teste a rota e só então cadastre a URL real.
 
 Teste sem dados fictícios de produção, usando o botão de teste/logs da Kiwify ou um payload de teste controlado:
 
-```bash
-curl -i -X POST https://SEU-DOMINIO-VERCEL.vercel.app/api/kiwify/webhook \
-  -H 'content-type: application/json' \
-  -H 'x-kiwify-webhook-token: SEU_TOKEN_CONFIGURADO' \
-  --data '{"id":"evento-de-teste","event":"compra_aprovada","data":{"transaction_id":"transacao-de-teste"}}'
-```
+Não use payload inventado para liberar acesso. Faça o teste pelo webhook real de uma venda aprovada ou pelo reenvio de um evento real aprovado da Kiwify.
 
 Não use esse exemplo para criar vendas reais; remova registros de teste se algum ambiente real for utilizado.
 
