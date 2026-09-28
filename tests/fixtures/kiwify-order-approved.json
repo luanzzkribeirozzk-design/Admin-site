@@ -1,0 +1,17 @@
+{
+  "order_id": "test-order-approved-001",
+  "order_status": "paid",
+  "store_id": "test-store-renda-mobile",
+  "webhook_event_type": "order_approved",
+  "Product": {
+    "product_id": "test-product-renda-mobile",
+    "product_name": "Produto de teste local"
+  },
+  "Customer": {
+    "email": "cliente.teste+renda-mobile@example.test",
+    "full_name": "Cliente Teste Local"
+  },
+  "Commissions": {
+    "charge_amount": "1990"
+  }
+}

@@ -42,5 +42,24 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
+
+    match /content/{contentId} {
+      allow read, write: if isAdmin();
+    }
+    match /categories/{categoryId} {
+      allow read, write: if isAdmin();
+    }
+    match /prompts/{promptId} {
+      allow read, write: if isAdmin();
+    }
+    match /tools/{toolId} {
+      allow read, write: if isAdmin();
+    }
+    match /challenges/{challengeId} {
+      allow read, write: if isAdmin();
+    }
+    match /notices/{noticeId} {
+      allow read, write: if isAdmin();
+    }
   }
 }
