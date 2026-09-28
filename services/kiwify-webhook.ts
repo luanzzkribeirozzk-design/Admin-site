@@ -4,12 +4,9 @@ import { getAdminFirestore } from "@/lib/firebase/admin";
 import type { KiwifyWebhookPayload, PurchaseStatus } from "@/types/domain";
 
 const SUPPORTED_EVENTS = new Set([
-  "compra_aprovada",
-  "compra_reembolsada",
-  "chargeback",
   "order_approved",
   "order_refunded",
-  "order_chargeback",
+  "chargeback",
 ]);
 
 function stringValue(value: unknown) {
@@ -67,9 +64,9 @@ export function validateClassicPayload(payload: KiwifyWebhookPayload) {
 }
 
 function purchaseStatus(eventType: string): PurchaseStatus | undefined {
-  if (eventType === "compra_aprovada" || eventType === "order_approved") return "approved";
-  if (eventType === "compra_reembolsada" || eventType === "order_refunded") return "refunded";
-  if (eventType === "chargeback" || eventType === "order_chargeback") return "chargeback";
+  if (eventType === "order_approved") return "approved";
+  if (eventType === "order_refunded") return "refunded";
+  if (eventType === "chargeback") return "chargeback";
   return undefined;
 }
 

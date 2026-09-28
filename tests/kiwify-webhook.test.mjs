@@ -11,6 +11,11 @@ test('webhook clássico usa segredo de caminho e não token do payload', async (
   assert.match(text, /KIWIFY_PRODUCT_ID/);
   assert.match(text, /timingSafeEqual/);
   assert.doesNotMatch(text, /payload\.token/);
+  assert.match(text, /order_approved/);
+  assert.match(text, /order_refunded/);
+  assert.match(text, /chargeback/);
+  assert.doesNotMatch(text, /billet_created/);
+  assert.doesNotMatch(text, /compra_aprovada/);
 });
 
 test('rota secreta não registra o segredo no diagnóstico', async () => {
