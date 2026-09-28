@@ -38,19 +38,31 @@ export function verifyWebhookPathSecret(secret: string) {
     : { ok: false as const, reason: "path_secret_invalid" };
 }
 
-export function validateClassicPayload(payload: KiwifyWebhookPayload) {
+export type ClassicPayloadStage = "passed" | "failed";
+
+export function inspectClassicPayload(payload: KiwifyWebhookPayload) {
   const expectedStoreId = process.env.KIWIFY_STORE_ID || process.env.KIWIFY_ACCOUNT_ID;
   const expectedProductId = process.env.KIWIFY_PRODUCT_ID;
   const storeId = stringValue(payload.store_id);
   const product = recordValue(payload.Product || payload.product);
   const productId = stringValue(product.product_id || product.productId);
   const eventType = stringValue(payload.webhook_event_type) || stringValue(payload.event) || stringValue(payload.type);
+  return {
+    store_id: expectedStoreId && storeId && safeEqual(storeId, expectedStoreId) ? "passed" as const : "failed" as const,
+    product_id: expectedProductId && productId && safeEqual(productId, expectedProductId) ? "passed" as const : "failed" as const,
+    webhook_event_type: eventType ? "passed" as const : "failed" as const,
+    event_supported: eventType && SUPPORTED_EVENTS.has(eventType) ? "passed" as const : "failed" as const,
+  };
+}
 
-  if (!expectedStoreId) return { ok: false as const, reason: "store_not_configured" };
-  if (!expectedProductId) return { ok: false as const, reason: "product_not_configured" };
-  if (!storeId || !safeEqual(storeId, expectedStoreId)) return { ok: false as const, reason: "store_invalid" };
-  if (!productId || !safeEqual(productId, expectedProductId)) return { ok: false as const, reason: "product_invalid" };
-  if (!eventType || !SUPPORTED_EVENTS.has(eventType)) return { ok: false as const, reason: "event_unsupported" };
+export function validateClassicPayload(payload: KiwifyWebhookPayload) {
+  if (!process.env.KIWIFY_STORE_ID && !process.env.KIWIFY_ACCOUNT_ID) return { ok: false as const, reason: "store_not_configured" };
+  if (!process.env.KIWIFY_PRODUCT_ID) return { ok: false as const, reason: "product_not_configured" };
+  const stages = inspectClassicPayload(payload);
+
+  if (stages.store_id === "failed") return { ok: false as const, reason: "store_invalid" };
+  if (stages.product_id === "failed") return { ok: false as const, reason: "product_invalid" };
+  if (stages.webhook_event_type === "failed" || stages.event_supported === "failed") return { ok: false as const, reason: "event_unsupported" };
   return { ok: true as const };
 }
 

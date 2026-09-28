@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminFirestore } from "@/lib/firebase/admin";
-import { processKiwifyWebhook, validateClassicPayload, verifyWebhookPathSecret } from "@/services/kiwify-webhook";
+import { inspectClassicPayload, processKiwifyWebhook, validateClassicPayload, verifyWebhookPathSecret } from "@/services/kiwify-webhook";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,20 +46,21 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, error: "payload inválido" }, { status: 400 });
   }
 
+  const stages = inspectClassicPayload(validation.data);
   const payloadValidation = validateClassicPayload(validation.data);
   if (!payloadValidation.ok) {
-    await saveDiagnostic({ validation: "rejected", statusHttp: payloadValidation.reason.endsWith("not_configured") ? 503 : 403, processing: "not_run", path: "/api/kiwify/webhook/[secret]" });
+    await saveDiagnostic({ ...stages, validation: "rejected", statusHttp: payloadValidation.reason.endsWith("not_configured") ? 503 : 403, processing: "not_run", path: "/api/kiwify/webhook/[secret]" });
     return NextResponse.json({ ok: false, error: "webhook não autorizado" }, { status: payloadValidation.reason.endsWith("not_configured") ? 503 : 403 });
   }
 
   try {
     const result = await processKiwifyWebhook(validation.data, rawBody);
     const status = result.kind === "ignored" ? 202 : 200;
-    await saveDiagnostic({ validation: "approved", statusHttp: status, processing: result.kind, path: "/api/kiwify/webhook/[secret]" });
+    await saveDiagnostic({ ...stages, validation: "approved", statusHttp: status, processing: result.kind, path: "/api/kiwify/webhook/[secret]" });
     return NextResponse.json({ ok: true, ...result }, { status });
   } catch (error) {
     console.error("Falha ao processar webhook Kiwify", { name: error instanceof Error ? error.name : "unknown" });
-    await saveDiagnostic({ validation: "approved", statusHttp: 500, processing: "error", path: "/api/kiwify/webhook/[secret]" });
+    await saveDiagnostic({ ...stages, validation: "approved", statusHttp: 500, processing: "error", path: "/api/kiwify/webhook/[secret]" });
     return NextResponse.json({ ok: false, error: "falha interna ao processar webhook" }, { status: 500 });
   }
 }
