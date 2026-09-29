@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue } from "firebase-admin/firestore";
@@ -147,6 +148,24 @@ export async function POST(request: Request) {
     const body = await request.json() as JsonRecord;
     const resource = typeof body.resource === "string" ? body.resource : "";
     const data = payloadFromRequest(body);
+    if (resource === "users") {
+      const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+      const displayName = typeof data.displayName === "string" ? data.displayName.trim() : "";
+      if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("Informe um e-mail válido.");
+      const password = `Rm!${randomBytes(18).toString("base64url")}9Z`;
+      const auth = getAuth(getFirebaseAdminApp());
+      const created = await auth.createUser({ email, password, displayName: displayName || undefined, disabled: false });
+      await getAdminFirestore().collection("users").doc(created.uid).set({
+        uid: created.uid,
+        email,
+        ...(displayName ? { displayName } : {}),
+        role: "user",
+        status: "active",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return NextResponse.json({ id: created.uid, credentials: { email, password } }, { status: 201 });
+    }
     if (!MANAGED_COLLECTIONS.has(resource) && resource !== SETTINGS_COLLECTION) throw new Error("Recurso inválido");
     const ref = await getAdminFirestore().collection(resource).add({ ...data, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     return NextResponse.json({ id: ref.id }, { status: 201 });

@@ -28,3 +28,12 @@ test('Avisos usa select para tipo/prioridade e checkbox para ativo', async () =>
   assert.match(text, /type="checkbox"/);
   assert.match(text, /<select/);
 });
+
+test('geração de login cliente permanece restrita a role user', async () => {
+  const [ui, api] = await Promise.all([source(), readFile('app/api/admin/route.ts', 'utf8')]);
+  assert.match(ui, /Gerar login cliente/);
+  assert.match(ui, /resource: "users"/);
+  assert.match(api, /const password = `Rm!\$\{randomBytes\(18\)/);
+  assert.match(api, /role: "user"/);
+  assert.doesNotMatch(api, /role: "admin"/);
+});
