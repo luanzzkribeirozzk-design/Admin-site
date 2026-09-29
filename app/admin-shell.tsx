@@ -33,9 +33,13 @@ function formatDate(value: unknown) {
 function display(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Sim" : "Não";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch { return "—"; }
+  }
   return String(value);
 }
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
+function rowsFrom(value: unknown): Row[] { return Array.isArray(value) ? value.filter(isRecord).map((row) => ({ ...row, id: typeof row.id === "string" ? row.id : "" })) : []; }
 function money(value: unknown) {
   const number = typeof value === "number" ? value : Number(value || 0);
   return number.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -95,19 +99,19 @@ function AdminShellContent() {
 }
 
 function Section({ section, data, reload, api }: { section: string; data: unknown; reload: () => void; api: (path: string, options?: RequestInit) => Promise<unknown> }) {
-  if (section === "dashboard") return <DashboardView data={(data || {}) as Dashboard} />;
-  if (section === "users") return <UsersView rows={(data || []) as Row[]} api={api} reload={reload} />;
-  if (section === "purchases") return <SalesView rows={(data || []) as Row[]} />;
-  if (section === "integration") return <IntegrationView data={(data || {}) as Record<string, unknown>} />;
-  if (section === "settings") return <SettingsView rows={(data || []) as Row[]} api={api} reload={reload} />;
-  if (section in resources) return <CrudView resource={section as Resource} rows={(data || []) as Row[]} api={api} reload={reload} />;
+  if (section === "dashboard") return <DashboardView data={(isRecord(data) ? data : {}) as Dashboard} />;
+  if (section === "users") return <UsersView rows={rowsFrom(data)} api={api} reload={reload} />;
+  if (section === "purchases") return <SalesView rows={rowsFrom(data)} />;
+  if (section === "integration") return <IntegrationView data={isRecord(data) ? data : {}} />;
+  if (section === "settings") return <SettingsView rows={rowsFrom(data)} api={api} reload={reload} />;
+  if (section in resources) return <CrudView resource={section as Resource} rows={rowsFrom(data)} api={api} reload={reload} />;
   return <EmptyState title="Seção não encontrada" />;
 }
 
 function DashboardView({ data }: { data: Dashboard }) {
   const stats = data.stats || {};
   const cards: Array<[string, React.ReactNode, string, string]> = [["Usuários totais", stats.totalUsers, "base cadastrada", "blue"], ["Usuários ativos", stats.activeUsers, "com acesso liberado", "green"], ["Vendas aprovadas", stats.approvedSales, "compras confirmadas", "purple"], ["Receita", money(stats.revenue), "soma das vendas", "red"]]; const statusBars: Array<[string, number, string]> = [["Aprovadas", data.salesByStatus?.approved || 0, "green"], ["Reembolsadas", data.salesByStatus?.refunded || 0, "orange"], ["Chargebacks", data.salesByStatus?.chargeback || 0, "red"]];
-  return <div className="fade-in"><div className="welcome-row"><div><p className="eyebrow">BEM-VINDO DE VOLTA</p><h1>Visão geral da plataforma</h1><p className="muted">Acompanhe acesso, vendas e operação em um só lugar.</p></div><div className="date-chip">● Dados em tempo real</div></div><div className="stats-grid">{cards.map(([label, value, hint, color]) => <div className={`stat-card ${color}`} key={String(label)}><div className="stat-top"><span>{label}</span><i>↗</i></div><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><p className="eyebrow">DISTRIBUIÇÃO</p><h3>Status das vendas</h3></div><span className="panel-tag">Total {Object.values(data.salesByStatus || {}).reduce((a, b) => a + b, 0)}</span></div><div className="bars">{statusBars.map(([label, value, color]) => <div className="bar-row" key={String(label)}><span>{label}</span><div className="bar-track"><div className={`bar ${color}`} style={{ width: `${Math.min(100, Number(value) * 12 + 4)}%` }} /></div><strong>{value}</strong></div>)}</div></section><section className="panel integration-card"><div className="panel-heading"><div><p className="eyebrow">CONECTIVIDADE</p><h3>Kiwify</h3></div><span className={`status-pill ${data.integration?.configured ? "success" : "warning"}`}>{data.integration?.configured ? "Operacional" : "Atenção"}</span></div><p className="muted">Webhook clássico e sincronização de acesso.</p><div className="integration-list"><span>Produto configurado <b>{data.integration?.productConfigured ? "Sim" : "Não"}</b></span><span>Eventos recebidos <b>{display(data.integration?.receivedEvents || 0)}</b></span><span>Processados <b>{display(data.integration?.processedEvents || 0)}</b></span><span>Pendentes <b>{display(data.integration?.pendingEvents || 0)}</b></span></div></section></div><section className="panel"><div className="panel-heading"><div><p className="eyebrow">OPERAÇÃO</p><h3>Atividade recente</h3></div><span className="panel-tag">últimos registros</span></div><ActivityList rows={data.recent || []} /></section></div>;
+  return <div className="fade-in"><div className="welcome-row"><div><p className="eyebrow">BEM-VINDO DE VOLTA</p><h1>Visão geral da plataforma</h1><p className="muted">Acompanhe acesso, vendas e operação em um só lugar.</p></div><div className="date-chip">● Dados em tempo real</div></div><div className="stats-grid">{cards.map(([label, value, hint, color]) => <div className={`stat-card ${color}`} key={String(label)}><div className="stat-top"><span>{label}</span><i>↗</i></div><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><p className="eyebrow">DISTRIBUIÇÃO</p><h3>Status das vendas</h3></div><span className="panel-tag">Total {Object.values(data.salesByStatus || {}).reduce((a, b) => a + (typeof b === "number" ? b : 0), 0)}</span></div><div className="bars">{statusBars.map(([label, value, color]) => <div className="bar-row" key={String(label)}><span>{label}</span><div className="bar-track"><div className={`bar ${color}`} style={{ width: `${Math.min(100, Number(value) * 12 + 4)}%` }} /></div><strong>{value}</strong></div>)}</div></section><section className="panel integration-card"><div className="panel-heading"><div><p className="eyebrow">CONECTIVIDADE</p><h3>Kiwify</h3></div><span className={`status-pill ${data.integration?.configured ? "success" : "warning"}`}>{data.integration?.configured ? "Operacional" : "Atenção"}</span></div><p className="muted">Webhook clássico e sincronização de acesso.</p><div className="integration-list"><span>Produto configurado <b>{data.integration?.productConfigured ? "Sim" : "Não"}</b></span><span>Eventos recebidos <b>{display(data.integration?.receivedEvents || 0)}</b></span><span>Processados <b>{display(data.integration?.processedEvents || 0)}</b></span><span>Pendentes <b>{display(data.integration?.pendingEvents || 0)}</b></span></div></section></div><section className="panel"><div className="panel-heading"><div><p className="eyebrow">OPERAÇÃO</p><h3>Atividade recente</h3></div><span className="panel-tag">últimos registros</span></div><ActivityList rows={rowsFrom(data.recent)} /></section></div>;
 }
 
 function ActivityList({ rows }: { rows: Row[] }) { if (!rows.length) return <EmptyState title="Nenhuma atividade registrada" text="Os novos eventos e vendas aparecerão aqui." />; return <div className="activity-list">{rows.map((row) => <div className="activity-row" key={`${row.id}-${String(row.eventType || row.status)}`}><div className="activity-icon">{row.eventType ? "⌁" : "◈"}</div><div className="activity-copy"><strong>{display(row.eventType || `Venda ${display(row.status)}`)}</strong><span>{display(row.customerEmail || row.transactionId || row.id)}</span></div><time>{formatDate(row.updatedAt || row.receivedAt || row.createdAt)}</time></div>)}</div>; }

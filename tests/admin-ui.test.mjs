@@ -45,3 +45,10 @@ test('shell possui fallback para exceção de renderização client-side', async
   assert.match(text, /admin_client_render_error/);
   assert.match(text, /window\.location\.reload\(\)/);
 });
+
+test('renderização normaliza listas e registros inesperados da API', async () => {
+  const text = await source();
+  assert.match(text, /function rowsFrom\(value: unknown\): Row\[\]/);
+  assert.match(text, /if \(section === "users"\) return <UsersView rows=\{rowsFrom\(data\)\}/);
+  assert.match(text, /<ActivityList rows=\{rowsFrom\(data\.recent\)\}/);
+});
