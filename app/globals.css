@@ -10,3 +10,12 @@
 @media (prefers-reduced-motion:reduce) { *,*:before,*:after { animation-duration:.01ms!important;transition-duration:.01ms!important; } }
 
 .checkbox-field { display:flex !important; align-items:center; gap:10px !important; min-height:42px; padding:10px 12px; border:1px solid #293140; border-radius:10px; background:#121720; color:#cbd3df !important; } .checkbox-field input { width:18px; height:18px; accent-color:#8b78ff; } .checkbox-field span { font-size:11px; }
+
+.error-screen { padding: 24px; }
+.error-card { width: min(100%, 420px); padding: 32px; border: 1px solid #302d43; border-radius: 20px; background: #11141c; text-align: center; box-shadow: 0 24px 70px #0008; }
+.error-card .brand-mark { margin: 0 auto 18px; }
+.error-card h1 { font-size: 22px; margin: 12px 0; }
+.error-card .muted { line-height: 1.7; margin-bottom: 22px; }
+.error-card .button { margin: 0 auto; }
+.error-actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.error-actions .button { margin: 0; }

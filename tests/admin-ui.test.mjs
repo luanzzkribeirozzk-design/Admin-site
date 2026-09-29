@@ -37,3 +37,11 @@ test('geração de login cliente permanece restrita a role user', async () => {
   assert.match(api, /role: "user"/);
   assert.doesNotMatch(api, /role: "admin"/);
 });
+
+
+test('shell possui fallback para exceção de renderização client-side', async () => {
+  const text = await source();
+  assert.match(text, /class AdminErrorBoundary extends Component/);
+  assert.match(text, /admin_client_render_error/);
+  assert.match(text, /window\.location\.reload\(\)/);
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type Auth, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
@@ -41,7 +41,7 @@ function money(value: unknown) {
   return number.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export default function AdminShell() {
+function AdminShellContent() {
   const [auth, setAuth] = useState<Auth | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -165,3 +165,36 @@ function SettingsView({ rows, api, reload }: { rows: Row[]; api: (path: string, 
 
 function ListHeading({ eyebrow, title, count, action }: { eyebrow: string; title: string; count: number; action?: React.ReactNode }) { return <div className="list-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title} <span>{count}</span></h1></div>{action}</div>; }
 function EmptyState({ title, text = "Ainda não há dados para exibir." }: { title: string; text?: string }) { return <div className="empty-state"><div className="empty-icon">＋</div><strong>{title}</strong><p>{text}</p></div>; }
+
+
+type ErrorBoundaryProps = { children: ReactNode };
+type ErrorBoundaryState = { hasError: boolean };
+
+class AdminErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("admin_client_render_error", { name: error.name, message: error.message, componentStack: info.componentStack });
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return <main className="screen-center error-screen">
+      <section className="error-card">
+        <div className="brand-mark">RM</div>
+        <p className="eyebrow">RENDA MOBILE / ADMIN</p>
+        <h1>O painel precisa ser recarregado.</h1>
+        <p className="muted">Uma falha temporária no navegador interrompeu esta tela. Seus dados não foram alterados.</p>
+        <button className="button primary" onClick={() => window.location.reload()}>Recarregar painel</button>
+      </section>
+    </main>;
+  }
+}
+
+export default function AdminShell() {
+  return <AdminErrorBoundary><AdminShellContent /></AdminErrorBoundary>;
+}
